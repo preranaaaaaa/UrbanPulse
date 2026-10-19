@@ -16,3 +16,20 @@ __pycache__/
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Raw collected data (can be large, and may contain personal info)
+data/raw/
+
+# ML models and caches (later phases)
+models/
+*.pt
+*.bin
+.cache/
+.huggingface/
+
+# Jupyter and test artifacts
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Streamlit secrets
+.streamlit/secrets.toml
