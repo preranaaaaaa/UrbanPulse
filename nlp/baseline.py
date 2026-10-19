@@ -5,11 +5,16 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 
 df = pd.read_csv("data/raw/emotion_mapped.csv")
+syn = pd.read_csv("data/synthetic_civic_train.csv")
 
 X_train, X_test, y_train, y_test = train_test_split(
     df["text"], df["emotion"],
     test_size=0.2, random_state=42, stratify=df["emotion"]
 )
+
+# add synthetic civic rows to TRAINING only (after the split)
+X_train = pd.concat([X_train] + [syn["text"]] * 10, ignore_index=True)
+y_train = pd.concat([y_train] + [syn["emotion"]] * 10, ignore_index=True)
 
 vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2)
 X_train_vec = vectorizer.fit_transform(X_train)
@@ -35,3 +40,8 @@ civic["predicted"] = model.predict(vectorizer.transform(civic["text"]))
 print()
 print("Accuracy on civic sentences:", (civic["predicted"] == civic["emotion"]).mean())
 print(civic[civic["predicted"] != civic["emotion"]][["text", "emotion", "predicted"]])
+
+import joblib, os
+os.makedirs("models", exist_ok=True)
+joblib.dump((vectorizer, model), "models/baseline.joblib")
+print("Model saved.")
