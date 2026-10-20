@@ -3,9 +3,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
+from sklearn.pipeline import FeatureUnion 
 
 df = pd.read_csv("data/raw/emotion_mapped.csv")
-syn = pd.read_csv("data/synthetic_civic_train.csv")
+syn = pd.concat([
+       pd.read_csv("data/synthetic_civic_train.csv"),
+       pd.read_csv("data/synthetic_civic_train_2.csv"),
+   ], ignore_index=True)
 
 X_train, X_test, y_train, y_test = train_test_split(
     df["text"], df["emotion"],
@@ -16,7 +20,11 @@ X_train, X_test, y_train, y_test = train_test_split(
 X_train = pd.concat([X_train] + [syn["text"]] * 10, ignore_index=True)
 y_train = pd.concat([y_train] + [syn["emotion"]] * 10, ignore_index=True)
 
-vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2)
+vectorizer = FeatureUnion([
+       ("word", TfidfVectorizer(ngram_range=(1, 2), min_df=2)),
+       ("char", TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), min_df=3)),
+   ])
+
 X_train_vec = vectorizer.fit_transform(X_train)
 X_test_vec = vectorizer.transform(X_test)
 
