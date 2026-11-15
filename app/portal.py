@@ -11,8 +11,10 @@ from streamlit_folium import st_folium
 
 sys.path.insert(0, os.getcwd())
 from nlp.predict import analyze_text
+from app import db
 
 st.set_page_config(page_title="UrbanPulse", layout="wide")
+db.init_db()
 
 COMPLAINTS, YT, LOG = "data/raw/complaints.csv", "data/raw/youtube_comments.csv", "data/action_log.csv"
 COORDS = {"Hampankatta": (12.8696, 74.8433), "Kankanady": (12.8791, 74.8500),
@@ -28,10 +30,6 @@ DEPTS = {"Road": ("Roads and Public Works", "A. Rao", "0000-000001", "roads@demo
          "Other": ("General Grievance Cell", "P. Kamath", "0000-000006", "general@demo.example")}
 STATUSES = ["New", "In progress", "Resolved", "Rejected"]
 SCORE = {"Angry": -2, "Frustrated": -1, "Neutral": 0, "Satisfied": 1, "Happy": 2}
-# DEMO LOGINS: username -> category (None = admin). Password from env, default below.
-USERS = {"admin": None, "roads_dept": "Road", "drainage_dept": "Drainage", "water_dept": "Water",
-         "waste_dept": "Garbage", "transport_dept": "Transport", "general_dept": "Other"}
-PASSWORD = os.getenv("DEMO_PASSWORD", "demo123")
 
 
 def read(path):
@@ -162,7 +160,7 @@ def page_overview(df):
 
 def page_queue(df, user):
     st.header("Department queue")
-    cat = USERS[user] or st.selectbox("Department", list(DEPTS))
+    cat = user["category"] or st.selectbox("Department", list(DEPTS))
     st.caption(DEPTS[cat][0])
     if df.empty:
         st.info("No complaints yet.")
@@ -179,12 +177,27 @@ def page_queue(df, user):
     status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
     note = st.text_input("Note on action taken")
     if st.button("Save update"):
-        add_log(cid, status, note, user)
+        add_log(cid, status, note, user["username"])
         st.rerun()
     log = read(LOG)
     if not log.empty:
         st.subheader("History")
         st.table(log[log["complaint_id"] == cid][["timestamp", "status", "note", "handled_by"]])
+def page_users():
+    st.header("Manage users")
+    st.dataframe(pd.DataFrame(db.list_users()), hide_index=True)
+    st.subheader("Add a user")
+    with st.form("new_user", clear_on_submit=True):
+        name = st.text_input("Username")
+        email = st.text_input("Email (optional)")
+        pw = st.text_input("Password (min 8 characters)", type="password")
+        role = st.selectbox("Role", ["department", "admin"])
+        cat = st.selectbox("Department (for department role)", list(DEPTS))
+        if st.form_submit_button("Create user"):
+            ok, msg = db.create_user(name, pw, role, cat, email)
+            (st.success if ok else st.error)(msg)
+
+
 def page_home():
     df, log = load(), read(LOG)
     st.markdown("""<div style="background:linear-gradient(135deg,#0F766E,#134E4A);padding:40px;
@@ -238,26 +251,27 @@ if mode == "Public":
 else:
     user = st.session_state.get("user")
     if not user:
-        st.sidebar.caption("Demo logins: admin, roads_dept, drainage_dept, water_dept, waste_dept, transport_dept, general_dept")
         u = st.sidebar.text_input("Username")
         p = st.sidebar.text_input("Password", type="password")
         if st.sidebar.button("Log in"):
-            if u in USERS and p == PASSWORD:
-                st.session_state["user"] = u
+            found = db.authenticate(u, p)
+            if found:
+                st.session_state["user"] = found
                 st.rerun()
             else:
                 st.sidebar.error("Wrong username or password.")
         st.header("Authority login")
-        st.info("Log in from the sidebar. This is a demo login, not real security.")
+        st.info("Log in from the sidebar with your department account.")
     else:
-        st.sidebar.write(f"Logged in as **{user}**")
+        st.sidebar.write(f"Logged in as **{user['username']}**")
         if st.sidebar.button("Log out"):
             st.session_state.pop("user")
             st.rerun()
         data = load()
-        if USERS[user] is None:
+        if user["role"] == "admin":
             {"Overview": lambda: page_overview(data),
-             "Department queue": lambda: page_queue(data, user)}[
-                st.sidebar.radio("Go to", ["Overview", "Department queue"])]()
+             "Department queue": lambda: page_queue(data, user),
+             "Manage users": page_users}[
+                st.sidebar.radio("Go to", ["Overview", "Department queue", "Manage users"])]()
         else:
             page_queue(data, user)

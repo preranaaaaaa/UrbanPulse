@@ -33,3 +33,6 @@ models/
 
 # Streamlit secrets
 .streamlit/secrets.toml
+
+# SQLite database (contains user accounts)
+data/*.db
