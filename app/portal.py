@@ -16,7 +16,6 @@ from app import db
 st.set_page_config(page_title="UrbanPulse", layout="wide")
 db.init_db()
 
-COMPLAINTS, YT, LOG = "data/raw/complaints.csv", "data/raw/youtube_comments.csv", "data/action_log.csv"
 COORDS = {"Hampankatta": (12.8696, 74.8433), "Kankanady": (12.8791, 74.8500),
           "Surathkal": (13.0108, 74.7942), "Lalbagh": (12.8860, 74.8420),
           "Bejai": (12.8950, 74.8420), "Kadri": (12.8870, 74.8530),
@@ -32,27 +31,14 @@ STATUSES = ["New", "In progress", "Resolved", "Rejected"]
 SCORE = {"Angry": -2, "Frustrated": -1, "Neutral": 0, "Satisfied": 1, "Happy": 2}
 
 
-def read(path):
-    return pd.read_csv(path, dtype={"id": str, "complaint_id": str}) if os.path.exists(path) else pd.DataFrame()
-
-
-def append(path, row):
-    pd.DataFrame([row]).to_csv(path, mode="a", header=not os.path.exists(path), index=False)
-
-
-def add_log(cid, status, note, by):
-    append(LOG, {"complaint_id": cid, "timestamp": datetime.now().isoformat(timespec="seconds"),
-                 "status": status, "note": note, "handled_by": by})
-
-
 def load():
-    df = pd.concat([read(COMPLAINTS), read(YT)], ignore_index=True)
+    df = db.get_complaints()
     if df.empty:
         return df
     df["intensity"] = pd.to_numeric(df.get("intensity", 1), errors="coerce").fillna(1)
     df["department"] = df["category"].map(lambda c: DEPTS.get(c, DEPTS["Other"])[0])
     df["score"] = df["emotion"].map(SCORE)
-    log = read(LOG)
+    log = db.get_log()
     df["status"], df["last_updated"] = "New", None
     if not log.empty:
         last = log.sort_values("timestamp").groupby("complaint_id").tail(1).set_index("complaint_id")
@@ -72,11 +58,9 @@ def page_report():
             st.warning("Please describe the problem first.")
             return
         emotion, intensity = analyze_text(text.strip())
-        cid = datetime.now().strftime("%m%d-%H%M%S")
-        append(COMPLAINTS, {"id": cid, "text": text.strip(), "area": area, "category": category,
-                            "source": "form", "timestamp": datetime.now().isoformat(),
-                            "intensity": intensity, "emotion": emotion})
-        add_log(cid, "New", "Complaint received", "system")
+        cid = db.new_complaint_id()
+        db.add_complaint(cid, text.strip(), area, category, "form", emotion, intensity)
+        db.add_log(cid, "New", "Complaint received", "system")
         st.success(f"Thank you. Your complaint ID is {cid}. Keep it to track progress.")
 
 
@@ -84,8 +68,8 @@ def page_track():
     st.header("Track your complaint")
     cid = st.text_input("Complaint ID").strip()
     if cid:
-        log = read(LOG)
-        hist = log[log["complaint_id"] == cid] if not log.empty else log
+        log = db.get_log()
+        hist = log[log["complaint_id"] == cid]
         if hist.empty:
             st.error("No complaint found with that ID.")
         else:
@@ -95,7 +79,7 @@ def page_track():
 
 def page_recent():
     st.header("Recent actions taken")
-    log, df = read(LOG), load()
+    log, df = db.get_log(), load()
     if log.empty or df.empty:
         st.info("No actions yet.")
         return
@@ -122,7 +106,9 @@ def page_overview(df):
         try:
             from collectors.youtube_collector import collect
             with st.spinner("Fetching YouTube comments..."):
-                st.success(f"Fetched {collect()} YouTube comments.")
+                fetched = collect()
+                db.import_legacy_csvs()
+                st.success(f"Fetched {fetched} YouTube comments.")
             df = load()
         except Exception as e:
             st.error(f"YouTube fetch failed: {e}")
@@ -177,12 +163,14 @@ def page_queue(df, user):
     status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
     note = st.text_input("Note on action taken")
     if st.button("Save update"):
-        add_log(cid, status, note, user["username"])
+        db.add_log(cid, status, note, user["username"])
         st.rerun()
-    log = read(LOG)
+    log = db.get_log()
     if not log.empty:
         st.subheader("History")
         st.table(log[log["complaint_id"] == cid][["timestamp", "status", "note", "handled_by"]])
+
+
 def page_users():
     st.header("Manage users")
     st.dataframe(pd.DataFrame(db.list_users()), hide_index=True)
@@ -199,7 +187,7 @@ def page_users():
 
 
 def page_home():
-    df, log = load(), read(LOG)
+    df, log = load(), db.get_log()
     st.markdown("""<div style="background:linear-gradient(135deg,#0F766E,#134E4A);padding:40px;
         border-radius:16px;margin-bottom:24px">
         <h1 style="margin:0;color:#fff;font-size:36px">Your city. Your voice.</h1>
