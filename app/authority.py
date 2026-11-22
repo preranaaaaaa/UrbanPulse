@@ -293,35 +293,120 @@ def approvals(user, df):
                 flash("ok" if ok else "error", msg)
                 st.rerun()
 
-
 def update_form(user, r):
     admin = user["role"] == "admin"
+    preview_key = f"related_preview_{r.id}"
+    confirm_key = f"confirm_related_{r.id}"
+
+    # Department users cannot update complaints awaiting approval or already closed.
     if not admin:
         if r.status == "Pending approval":
-            ui.html_block('<div class="alerts"><div class="alert gold"><b>Waiting for the main admin.</b> You sent this '
-                          'as solved. Residents will see Resolved once it is approved.</div></div>')
+            ui.html_block(
+                '<div class="alerts"><div class="alert gold">'
+                '<b>Waiting for the main admin.</b> You sent this as solved. '
+                'Residents will see Resolved once it is approved.'
+                '</div></div>'
+            )
             return
+
         if r.status in ("Resolved", "Rejected"):
             empty(f"This complaint is {r.status.lower()}. No further updates are needed.")
             return
+
+    # Find related complaints and save the preview in session state.
+    if st.button("Preview related complaints", key=f"preview_button_{r.id}"):
+        st.session_state[preview_key] = db.get_related_complaints(r.id)
+        st.session_state[confirm_key] = False
+        st.rerun()
+
+    related_ids = st.session_state.get(preview_key)
+
+    if related_ids is None:
+        st.info("Click 'Preview related complaints' before saving an update.")
+        return
+
+    if not related_ids:
+        st.warning("No open related complaints were found. Please refresh the preview.")
+        return
+
+    # Show the exact complaints included in the preview.
+    complaints = db.get_complaints()
+    matches = complaints[complaints["id"].isin(related_ids)]
+
+    st.write(f"**Preview: {len(matches)} complaint(s) will be updated**")
+    st.dataframe(
+        matches[["id", "text", "area", "category"]],
+        hide_index=True,
+        use_container_width=True
+    )
+
+    # Keep the checkbox OUTSIDE the form so Streamlit updates it immediately.
+    confirmed = st.checkbox(
+        "I checked the preview and want to update all listed complaints.",
+        key=confirm_key
+    )
+
     with st.form(f"update_{r.id}"):
         if admin:
-            status = st.selectbox("Status", STATUSES, index=STATUSES.index(r.status))
+            status_options = list(STATUSES)
+            current_index = (
+                status_options.index(r.status)
+                if r.status in status_options
+                else 0
+            )
+
+            status = st.selectbox(
+                "Status",
+                status_options,
+                index=current_index
+            )
         else:
-            choice = st.radio("What is the update?",
-                              ["Work has started", "Problem solved, send to the main admin for approval"])
-            status = "In progress" if choice == "Work has started" else "Pending approval"
-        note = st.text_area("Note on the action taken", height=90,
-                            help="Residents can read this note when they track their complaint.")
-        saved = st.form_submit_button("Save update", type="primary")
+            choice = st.radio(
+                "What is the update?",
+                [
+                    "Work has started",
+                    "Problem solved, send to the main admin for approval"
+                ]
+            )
+
+            status = (
+                "In progress"
+                if choice == "Work has started"
+                else "Pending approval"
+            )
+
+        note = st.text_area(
+            "Note on the action taken",
+            height=90,
+            help="Residents can read this note when they track their complaint."
+        )
+
+        saved = st.form_submit_button(
+            "Save update",
+            type="primary"
+        )
+
     if saved:
-        ok, msg = db.update_complaint_status(user, r.id, status, note)
+        if not confirmed:
+            st.warning("Please check the confirmation box above before saving.")
+            return
+
+        ok, msg = db.update_complaint_status(
+            user,
+            r.id,
+            status,
+            note,
+            related_ids=related_ids
+        )
+
         if ok:
+            st.session_state.pop(preview_key, None)
+            st.session_state.pop(confirm_key, None)
             flash("ok", msg)
             st.rerun()
-        st.error(msg)
-
-
+        else:
+            st.error(msg)
+            
 def history(cid):
     log = db.get_log()
     log = log[log["complaint_id"] == cid]

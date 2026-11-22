@@ -338,7 +338,7 @@ def badge(status):
 
 
 def hero_guest():
-    return h(f"""
+    return h("""
     <section class="hero">
       <div>
         <h1>Report a civic problem. Follow it until it is fixed.</h1>
@@ -346,21 +346,56 @@ def hero_guest():
         and shows every update until the work is done.</p>
         <p class="hero-note">Free for every resident. Your complaints are visible only to you and the department handling them.</p>
       </div>
-      <div class="ticket" aria-label="Sample complaint ticket">
-        <div class="ticket-top">
-          <div class="ticket-label">Complaint ID</div>
-          <div class="ticket-id">1122-093015-7C</div>
-          <p class="ticket-text">Drain cover broken near the Hampankatta junction. Two-wheelers are swerving into traffic.</p>
-          <div class="chips"><span class="chip">Drainage</span><span class="chip">Hampankatta</span></div>
+
+      <div style="
+          background: rgba(255,255,255,0.06);
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 18px;
+          padding: 28px;
+          align-self: center;
+      ">
+        <p style="
+            color: #8edfd0;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        ">From report to resolution</p>
+
+        <h2 style="
+            color: white;
+            font-size: 25px;
+            line-height: 1.3;
+            margin: 0 0 22px 0;
+        ">Every report helps make our city better.</h2>
+
+        <div style="display: flex; gap: 14px; margin-bottom: 18px;">
+          <div style="color: #8edfd0; font-size: 20px; font-weight: 700;">01</div>
+          <div>
+            <p style="color: white; font-weight: 600; margin: 0 0 4px 0;">Report the problem</p>
+            <p style="color: #c4d1dc; font-size: 14px; margin: 0;">Share the location and details of the civic issue.</p>
+          </div>
         </div>
-        <div class="perf"></div>
-        <div class="ticket-bottom">
-          {stepper("In progress")}
-          <p class="ticket-tag">Sample complaint, shown to explain how tracking works.</p>
+
+        <div style="display: flex; gap: 14px; margin-bottom: 18px;">
+          <div style="color: #8edfd0; font-size: 20px; font-weight: 700;">02</div>
+          <div>
+            <p style="color: white; font-weight: 600; margin: 0 0 4px 0;">Reach the right department</p>
+            <p style="color: #c4d1dc; font-size: 14px; margin: 0;">Your report is routed to the team responsible for the issue.</p>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 14px;">
+          <div style="color: #8edfd0; font-size: 20px; font-weight: 700;">03</div>
+          <div>
+            <p style="color: white; font-weight: 600; margin: 0 0 4px 0;">Follow the updates</p>
+            <p style="color: #c4d1dc; font-size: 14px; margin: 0;">Check your complaint's progress from your account.</p>
+          </div>
         </div>
       </div>
-    </section>""")
-
+    </section>
+    """)
 
 def welcome_banner(name, counts):
     total = sum(counts.values())

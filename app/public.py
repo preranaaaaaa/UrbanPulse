@@ -88,8 +88,7 @@ def render_home():
                              "A few habits that get problems fixed faster and keep Mangaluru safe and clean."))
     ui.html_block(ui.guidelines())
     ui.html_block(ui.emergency())
-    ui.html_block(ui.section("Who to contact", "Each complaint category is handled by one department."))
-    ui.html_block(ui.departments(DEPTS))
+    
     ui.html_block(ui.footer())
 
 

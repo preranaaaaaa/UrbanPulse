@@ -11,7 +11,7 @@ import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
-
+from difflib import SequenceMatcher
 import pandas as pd
 
 from app.constants import STATUSES
@@ -233,34 +233,114 @@ def _current_status(c, complaint_id):
                     (complaint_id,)).fetchone()
     return row["status"] if row else "New"
 
-
-def update_complaint_status(user, complaint_id, status, note=""):
-    """Staff status change. Returns (ok, message). Permission rules live here, not in the UI:
-    a department can only touch its own category, and can only move a complaint to 'In progress'
-    or send it for approval. Only the main admin can close (Resolved / Rejected) a complaint."""
-    note = (note or "").strip()
+def get_related_complaints(complaint_id, threshold=0.72):
+    """Find open complaints likely describing the same issue."""
     with connect() as c:
-        row = c.execute("SELECT category FROM complaints WHERE id = ?", (complaint_id,)).fetchone()
-        if not row:
-            return False, "Complaint not found."
-        current = _current_status(c, complaint_id)
+        selected = c.execute(
+            "SELECT id, text, category, area FROM complaints WHERE id = ?",
+            (complaint_id,)
+        ).fetchone()
+
+        if not selected:
+            return []
+
+        def normalize(text):
+            return " ".join(re.findall(r"\w+", (text or "").lower()))
+
+        target_text = normalize(selected["text"])
+        if not target_text:
+            return [complaint_id]
+
+        rows = c.execute("""
+            SELECT c.id, c.text, c.category, c.area,
+                   COALESCE((
+                       SELECT l.status
+                       FROM action_log l
+                       WHERE l.complaint_id = c.id
+                       ORDER BY l.id DESC
+                       LIMIT 1
+                   ), 'New') AS status
+            FROM complaints c
+            WHERE c.category = ? AND c.area = ?
+        """, (selected["category"], selected["area"])).fetchall()
+
+        related = []
+        for row in rows:
+            if row["status"] in ("Resolved", "Rejected"):
+                continue
+
+            candidate = normalize(row["text"])
+            similarity = SequenceMatcher(
+                None, target_text, candidate
+            ).ratio()
+
+            if row["id"] == complaint_id or similarity >= threshold:
+                related.append(row["id"])
+
+        return related
+
+def update_complaint_status(user, complaint_id, status, note="", related_ids=None):
+    """Update the selected complaint and the exact related complaints previewed by staff."""
+    note = (note or "").strip()
+
+    if related_ids is None:
+        return False, "Please preview related complaints before saving."
+
+    # Re-check the related group at save time.
+    current_related = get_related_complaints(complaint_id)
+    expected_ids = set(current_related or [complaint_id])
+    selected_ids = set(related_ids)
+
+    if selected_ids != expected_ids:
+        return False, "The related complaints changed. Please preview them again."
+
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with connect() as c:
         if user["role"] == "department":
-            if row["category"] != user["category"]:
-                return False, "This complaint belongs to another department."
             if status not in ("In progress", "Pending approval"):
                 return False, "A department can set In progress or send a complaint for approval."
-            if current == "Pending approval":
-                return False, "This complaint is already waiting for the main admin's approval."
-            if current in ("Resolved", "Rejected"):
-                return False, "This complaint is already closed."
+
             if status == "Pending approval" and not note:
                 return False, "Write a short note on the work done before sending it for approval."
+
         elif user["role"] != "admin" or status not in STATUSES:
             return False, "You do not have permission to do that."
-        c.execute("INSERT INTO action_log (complaint_id, timestamp, status, note, handled_by) VALUES (?, ?, ?, ?, ?)",
-                  (complaint_id, datetime.now().isoformat(timespec="seconds"), status, note, user["username"]))
-    return True, "Update saved."
 
+        # Validate every complaint before writing any updates.
+        for cid in selected_ids:
+            row = c.execute(
+                "SELECT category FROM complaints WHERE id = ?",
+                (cid,)
+            ).fetchone()
+
+            if not row:
+                return False, f"Complaint {cid} was not found."
+
+            current_status = _current_status(c, cid)
+
+            if user["role"] == "department":
+                if row["category"] != user["category"]:
+                    return False, "A related complaint belongs to another department."
+
+                if current_status == "Pending approval":
+                    return False, "A related complaint is already waiting for admin approval."
+
+                if current_status in ("Resolved", "Rejected"):
+                    return False, "A related complaint is already closed."
+
+        # All checks passed: update the whole group.
+        for cid in selected_ids:
+            c.execute(
+                """
+                INSERT INTO action_log
+                    (complaint_id, timestamp, status, note, handled_by)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (cid, now, status, note, user["username"])
+            )
+
+    return True, f"Update saved for {len(selected_ids)} complaint(s)."
 
 def review_resolution(user, complaint_id, approve, note=""):
     """Main admin approves a department's 'problem solved' claim (-> Resolved, visible to the citizen)
